@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "foodtweaker",
+  "version": "${version}",
+  "name": "FoodTweaker",
+  "description": "Config-driven overrides for food stats (nutrition, saturation, eat time, always-edible, and on-eat effects) of any vanilla or modded item.",
+  "authors": [
+    "icywhenhot"
+  ],
+  "contact": {},
+  "license": "CC0-1.0",
+  "icon": "assets/foodtweaker/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.foodtweaker.fabric.FoodTweakerFabric"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.2",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "architectury": ">=13.0.8",
+    "fabric-api": "*"
+  }
+}

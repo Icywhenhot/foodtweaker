@@ -1,0 +1,34 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "CC0-1.0"
+
+[[mods]]
+modId = "foodtweaker"
+version = "${version}"
+displayName = "FoodTweaker"
+authors = "icywhenhot"
+logoFile = "assets/foodtweaker/icon.png"
+description = '''
+Config-driven overrides for food stats (nutrition, saturation, eat time, always-edible, and on-eat effects) of any vanilla or modded item.
+'''
+
+[[dependencies.foodtweaker]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.foodtweaker]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.foodtweaker]]
+modId = "architectury"
+type = "required"
+versionRange = "[13.0.8,)"
+ordering = "AFTER"
+side = "BOTH"
