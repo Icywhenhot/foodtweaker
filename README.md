@@ -5,9 +5,7 @@ stats of **any item — vanilla or modded** — from a single JSON file, without
 touching the original mod.
 
 - **Loaders:** Fabric and NeoForge (built with [Architectury](https://docs.architectury.dev/))
-- **Minecraft:** 1.21.1
 - **Author:** icywhenhot
-- **License:** CC0-1.0
 
 > FoodTweaker changes **nothing** on its own. It only does something once you add entries to its
 > config, so it's safe to ship in a pack and configure later.
@@ -81,7 +79,6 @@ The config file is created automatically on first launch at:
 <game folder>/config/foodtweaker.json
 ```
 
-(In a dev environment that's `fabric/run/config/…` or `neoforge/run/config/…`.)
 
 ### Top-level options
 
@@ -167,30 +164,8 @@ mods (JEI / REI) also display ids.
 
 ---
 
-## Building from source
-
-Requires **JDK 21**.
-
-```
-./gradlew build
-```
-
-Output jars:
-
-```
-fabric/build/libs/foodtweaker-fabric-<version>.jar
-neoforge/build/libs/foodtweaker-neoforge-<version>.jar
-```
-
-> **Windows note:** if Gradle fails with `Unable to establish loopback connection`, the JDK's NIO
-> selector is trying to use an AF_UNIX socket in a temp path it can't use. Point it at a clean
-> folder, e.g. set `_JAVA_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:\fttmp`. The bundled `dev.bat`
-> sets this (and the JDK 21 path) for you — run `dev.bat build`, or `dev.bat :fabric:runClient`
-> to launch a test client.
 
 ### Mod icon
-
-Drop a 128×128 (or larger, square) PNG at:
 
 ```
 common/src/main/resources/assets/foodtweaker/icon.png
