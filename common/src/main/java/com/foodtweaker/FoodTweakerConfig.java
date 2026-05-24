@@ -152,7 +152,7 @@ public final class FoodTweakerConfig {
                 "nutrition": "int  - hunger points restored (2 = one half-drumstick)",
                 "saturation": "float - saturation MODIFIER, like vanilla. Saturation gained = nutrition * saturation * 2",
                 "can_always_eat": "bool  - if true, edible even on a full hunger bar (like golden apples)",
-                "eat_seconds": "float - seconds it takes to eat. Vanilla normal = 1.6, fast (dried kelp) = 0.8",
+                "eat_seconds": "float - eat speed. <= 0.8 marks the food as 'fast' (eaten in ~0.8s, like dried kelp); anything higher is normal speed (~1.6s). 1.20.1 only supports these two speeds.",
                 "effects": "array - status effects applied on eating. Works with vanilla AND modded effect ids."
               },
               "_effect_field_reference": {

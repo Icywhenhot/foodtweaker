@@ -4,7 +4,8 @@ A lightweight, config-driven utility mod for modpack developers. It lets you ove
 stats of **any item — vanilla or modded** — from a single JSON file, without writing code or
 touching the original mod.
 
-- **Loaders:** Fabric and NeoForge (built with [Architectury](https://docs.architectury.dev/))
+- **Loaders:** Fabric and Forge (built with [Architectury](https://docs.architectury.dev/))
+- **Minecraft:** 1.20.1
 - **Author:** icywhenhot
 
 > FoodTweaker changes **nothing** on its own. It only does something once you add entries to its
@@ -16,8 +17,8 @@ touching the original mod.
 
 | Loader | Required mods |
 |--------|---------------|
-| Fabric | Fabric API, Architectury API (≥ 13.0.8) |
-| NeoForge | Architectury API (≥ 13.0.8) |
+| Fabric | Fabric API, Architectury API (≥ 9.2.14) |
+| Forge | Architectury API (≥ 9.2.14) |
 
 ---
 
@@ -30,7 +31,7 @@ For any item id you list, you can override:
 | `nutrition` | Hunger points restored (2 = one half-drumstick) |
 | `saturation` | Saturation **modifier** (same meaning as vanilla). Saturation gained = `nutrition × saturation × 2` |
 | `can_always_eat` | If `true`, the item can be eaten on a full hunger bar (like golden apples) |
-| `eat_seconds` | How long it takes to eat. Vanilla normal = `1.6`, fast (e.g. dried kelp) = `0.8` |
+| `eat_seconds` | Eat speed. On 1.20.1 there are only two speeds: a value of `0.8` or less marks the food as **fast** (eaten in ~0.8s, like dried kelp); anything higher is normal speed (~1.6s) |
 | `effects` | Status effects applied when eaten — **works with vanilla *and* modded effects** (e.g. pufferfish-style Hunger/Poison/Nausea, or a modded buff) |
 
 It can also **turn a non-food item into food** (e.g. make a stick edible) — just give it at least

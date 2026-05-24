@@ -10,7 +10,7 @@ REM    - preferIPv4Stack=true -> reliable DNS (IPv6/::1 is broken here).
 REM
 REM  Usage:
 REM    dev.bat                -> runs the Fabric client (default)
-REM    dev.bat :neoforge:runClient
+REM    dev.bat :forge:runClient
 REM    dev.bat :fabric:runServer
 REM    dev.bat build          -> just builds both jars
 REM ===========================================================================
