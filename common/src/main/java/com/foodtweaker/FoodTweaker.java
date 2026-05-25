@@ -24,6 +24,7 @@ import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -38,6 +39,10 @@ public final class FoodTweaker {
     // Item stores its default data components in a private final field of type DataComponentMap.
     // We swap that map out at runtime so newly-created ItemStacks pick up our food overrides.
     private static final Field ITEM_COMPONENTS_FIELD = findComponentsField();
+
+    // PossibleEffect's canonical constructor is not accessible from outside its package in 1.21.1,
+    // so we reach it reflectively rather than calling `new` directly (which throws IllegalAccessError).
+    private static final Constructor<FoodProperties.PossibleEffect> POSSIBLE_EFFECT_CTOR = findPossibleEffectCtor();
 
     // The components map each item had before we ever touched it, so a reload can revert cleanly.
     private static final Map<Item, DataComponentMap> ORIGINALS = new IdentityHashMap<>();
@@ -160,7 +165,16 @@ public final class FoodTweaker {
         int durationTicks = Math.max(1, Math.round(ee.durationSeconds * 20f));
         MobEffectInstance instance = new MobEffectInstance(
                 holder.get(), durationTicks, ee.amplifier, ee.ambient, ee.showParticles, ee.showIcon);
-        return new FoodProperties.PossibleEffect(instance, ee.probability);
+        if (POSSIBLE_EFFECT_CTOR == null) {
+            LOGGER.warn("[FoodTweaker] Cannot construct FoodProperties.PossibleEffect on this version - skipping effect '{}' on food '{}'.", ee.id, foodId);
+            return null;
+        }
+        try {
+            return POSSIBLE_EFFECT_CTOR.newInstance(instance, ee.probability);
+        } catch (ReflectiveOperationException e) {
+            LOGGER.warn("[FoodTweaker] Failed to construct PossibleEffect for '{}' on food '{}': {}", ee.id, foodId, e.toString());
+            return null;
+        }
     }
 
     private static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher,
@@ -198,6 +212,18 @@ public final class FoodTweaker {
                     return f;
                 }
             }
+            return null;
+        }
+    }
+
+    private static Constructor<FoodProperties.PossibleEffect> findPossibleEffectCtor() {
+        try {
+            Constructor<FoodProperties.PossibleEffect> c =
+                    FoodProperties.PossibleEffect.class.getDeclaredConstructor(MobEffectInstance.class, float.class);
+            c.setAccessible(true);
+            return c;
+        } catch (NoSuchMethodException e) {
+            LOGGER.error("[FoodTweaker] Could not locate FoodProperties.PossibleEffect(MobEffectInstance, float) constructor", e);
             return null;
         }
     }
