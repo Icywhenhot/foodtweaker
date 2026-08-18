@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.architectury.platform.Platform;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public final class FoodTweakerConfig {
@@ -20,13 +22,21 @@ public final class FoodTweakerConfig {
     public boolean logChanges = true;
     public Map<String, FoodOverride> foods = new LinkedHashMap<>();
 
-    /** All fields are nullable: a null field means "leave the item's existing value untouched". */
     public static final class FoodOverride {
         public Integer nutrition;
         public Float saturation;
         public Boolean canAlwaysEat;
         public Float eatSeconds;
-        public List<EffectEntry> effects; // null = keep existing effects; present = replace them
+        public List<EffectEntry> effects;
+        public List<AttributeEntry> attributeModifiers;
+    }
+
+    public static final class AttributeEntry {
+        public String id;
+        public double amount;
+        public AttributeModifier.Operation operation = AttributeModifier.Operation.ADDITION;
+        public boolean stacks = false;
+        public Double maxTotal;
     }
 
     public static final class EffectEntry {
@@ -43,7 +53,14 @@ public final class FoodTweakerConfig {
         return Platform.getConfigFolder().resolve("foodtweaker.json");
     }
 
+    private static String lastError;
+
+    public static String lastError() {
+        return lastError;
+    }
+
     public static FoodTweakerConfig load() {
+        lastError = null;
         Path path = configPath();
         if (!Files.exists(path)) {
             writeDefault(path);
@@ -54,6 +71,7 @@ public final class FoodTweakerConfig {
             JsonObject root = JsonParser.parseString(text).getAsJsonObject();
             return parse(root);
         } catch (Exception e) {
+            lastError = e.getMessage() != null ? e.getMessage() : e.toString();
             FoodTweaker.LOGGER.error("[FoodTweaker] Failed to read config at {} - using defaults. Error: {}", path, e.toString());
             return new FoodTweakerConfig();
         }
@@ -70,7 +88,7 @@ public final class FoodTweakerConfig {
         if (root.has("foods") && root.get("foods").isJsonObject()) {
             for (Map.Entry<String, JsonElement> e : root.getAsJsonObject("foods").entrySet()) {
                 if (e.getKey().startsWith("_")) {
-                    continue; // allow "_comment" style keys inside foods
+                    continue;
                 }
                 if (e.getValue().isJsonObject()) {
                     cfg.foods.put(e.getKey(), parseFood(e.getValue().getAsJsonObject()));
@@ -103,7 +121,53 @@ public final class FoodTweakerConfig {
                 }
             }
         }
+        if (o.has("attribute_modifiers") && o.get("attribute_modifiers").isJsonArray()) {
+            f.attributeModifiers = new ArrayList<>();
+            for (JsonElement el : o.getAsJsonArray("attribute_modifiers")) {
+                if (el.isJsonObject()) {
+                    f.attributeModifiers.add(parseAttribute(el.getAsJsonObject()));
+                }
+            }
+        }
         return f;
+    }
+
+    private static AttributeEntry parseAttribute(JsonObject o) {
+        AttributeEntry a = new AttributeEntry();
+        if (o.has("id")) {
+            a.id = o.get("id").getAsString();
+        }
+        if (o.has("amount")) {
+            a.amount = o.get("amount").getAsDouble();
+        }
+        if (o.has("operation")) {
+            a.operation = parseOperation(o.get("operation").getAsString());
+        }
+        if (o.has("stacks")) {
+            a.stacks = o.get("stacks").getAsBoolean();
+        }
+        if (o.has("max_total")) {
+            a.maxTotal = o.get("max_total").getAsDouble();
+        }
+        return a;
+    }
+
+    private static AttributeModifier.Operation parseOperation(String raw) {
+        switch (raw.toLowerCase(Locale.ROOT)) {
+            case "addition":
+            case "add":
+            case "0":
+                return AttributeModifier.Operation.ADDITION;
+            case "multiply_base":
+            case "1":
+                return AttributeModifier.Operation.MULTIPLY_BASE;
+            case "multiply_total":
+            case "2":
+                return AttributeModifier.Operation.MULTIPLY_TOTAL;
+            default:
+                FoodTweaker.LOGGER.warn("[FoodTweaker] '{}' is not a known attribute operation - using 'addition'. Valid values: addition, multiply_base, multiply_total.", raw);
+                return AttributeModifier.Operation.ADDITION;
+        }
     }
 
     private static EffectEntry parseEffect(JsonObject o) {
@@ -144,7 +208,7 @@ public final class FoodTweakerConfig {
 
     private static final String DEFAULT_JSON = """
             {
-              "_comment": "FoodTweaker config. Add entries under \\"foods\\" to override food stats for ANY item (vanilla or modded). With an empty \\"foods\\" object this mod changes nothing. Run /foodtweaker reload in-game to apply edits without restarting. Every per-food field is optional - omit a field to keep the item's current value.",
+              "_comment": "FoodTweaker config. Add entries under \\"foods\\" to override food stats for ANY item (vanilla or modded). With an empty \\"foods\\" object this mod changes nothing. Run /foodtweaker reload (or plain /reload) in-game to apply edits without restarting. Every per-food field is optional - omit a field to keep the item's current value.",
               "enabled": true,
               "logChanges": true,
               "_field_reference": {
@@ -153,7 +217,8 @@ public final class FoodTweakerConfig {
                 "saturation": "float - saturation MODIFIER, like vanilla. Saturation gained = nutrition * saturation * 2",
                 "can_always_eat": "bool  - if true, edible even on a full hunger bar (like golden apples)",
                 "eat_seconds": "float - eat speed. <= 0.8 marks the food as 'fast' (eaten in ~0.8s, like dried kelp); anything higher is normal speed (~1.6s). 1.20.1 only supports these two speeds.",
-                "effects": "array - status effects applied on eating. Works with vanilla AND modded effect ids."
+                "effects": "array - status effects applied on eating. Works with vanilla AND modded effect ids.",
+                "attribute_modifiers": "array - PERMANENT stat changes applied on eating (e.g. +2 max health forever). Saved with the player. Use /foodtweaker reset <player> to take them back."
               },
               "_effect_field_reference": {
                 "id": "effect id, e.g. minecraft:absorption or minecraft:hunger",
@@ -164,6 +229,13 @@ public final class FoodTweakerConfig {
                 "show_particles": "bool - show effect particles",
                 "show_icon": "bool - show the effect icon in the HUD"
               },
+              "_attribute_field_reference": {
+                "id": "attribute id, e.g. minecraft:generic.max_health, minecraft:generic.movement_speed, minecraft:generic.attack_damage, minecraft:generic.armor, minecraft:generic.knockback_resistance, minecraft:generic.luck. Modded attribute ids work too.",
+                "amount": "float - how much to grant per meal. For max_health, 2.0 = one heart.",
+                "operation": "addition | multiply_base | multiply_total (default: addition). Same meaning as vanilla equipment modifiers.",
+                "stacks": "bool - false (default) grants the bonus ONCE, no matter how often the food is eaten. true accumulates on every meal.",
+                "max_total": "float - optional cap on the accumulated amount when stacks is true. Omit for no cap."
+              },
               "_example": {
                 "minecraft:apple": {
                   "nutrition": 8,
@@ -172,6 +244,17 @@ public final class FoodTweakerConfig {
                   "eat_seconds": 0.8,
                   "effects": [
                     { "id": "minecraft:absorption", "amplifier": 0, "duration_seconds": 60, "probability": 1.0 }
+                  ]
+                },
+                "minecraft:golden_apple": {
+                  "_note": "eat once for a permanent extra heart; eat cooked beef repeatedly for up to +4 hearts total",
+                  "attribute_modifiers": [
+                    { "id": "minecraft:generic.max_health", "amount": 2.0, "operation": "addition" }
+                  ]
+                },
+                "minecraft:cooked_beef": {
+                  "attribute_modifiers": [
+                    { "id": "minecraft:generic.max_health", "amount": 1.0, "operation": "addition", "stacks": true, "max_total": 8.0 }
                   ]
                 },
                 "minecraft:rotten_flesh": {

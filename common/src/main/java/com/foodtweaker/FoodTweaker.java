@@ -1,16 +1,25 @@
 package com.foodtweaker;
 
+import com.foodtweaker.FoodTweakerConfig.AttributeEntry;
 import com.foodtweaker.FoodTweakerConfig.EffectEntry;
 import com.foodtweaker.FoodTweakerConfig.FoodOverride;
 import com.mojang.brigadier.CommandDispatcher;
 import dev.architectury.event.events.common.CommandRegistrationEvent;
 import dev.architectury.event.events.common.LifecycleEvent;
+import dev.architectury.registry.ReloadListenerRegistry;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.server.packs.resources.SimplePreparableReloadListener;
+import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.food.FoodProperties;
@@ -19,7 +28,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
+import java.util.Collection;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -27,27 +38,43 @@ public final class FoodTweaker {
     public static final String MOD_ID = "foodtweaker";
     public static final Logger LOGGER = LoggerFactory.getLogger("FoodTweaker");
 
-    // 1.20.1 stores an item's food data in a private final FoodProperties field on Item.
-    // We swap that field out at runtime so the item becomes edible/non-edible with our values.
     private static final Field ITEM_FOOD_FIELD = findFoodField();
 
-    // The FoodProperties each item had before we ever touched it (null = was not edible),
-    // so a reload can revert cleanly. IdentityHashMap permits null values.
     private static final Map<Item, FoodProperties> ORIGINALS = new IdentityHashMap<>();
+
+    private static final Map<Item, List<AttributeEntry>> ATTRIBUTES = new IdentityHashMap<>();
 
     private static FoodTweakerConfig config = new FoodTweakerConfig();
 
     public static void init() {
         config = FoodTweakerConfig.load();
 
-        // Registries are frozen by the time a server (integrated or dedicated) is about to start,
-        // so every modded item exists and can be patched.
         LifecycleEvent.SERVER_BEFORE_START.register(server -> applyOverrides());
 
+        ReloadListenerRegistry.register(PackType.SERVER_DATA, new SimplePreparableReloadListener<Void>() {
+            @Override
+            protected Void prepare(ResourceManager manager, ProfilerFiller profiler) {
+                return null;
+            }
+
+            @Override
+            protected void apply(Void unused, ResourceManager manager, ProfilerFiller profiler) {
+                FoodTweaker.reload();
+            }
+        }, new ResourceLocation(MOD_ID, "config"));
+
         CommandRegistrationEvent.EVENT.register(FoodTweaker::registerCommands);
+        FoodTweakerAttributes.init();
     }
 
-    /** Re-reads the config from disk and re-applies it. Returns the number of foods applied. */
+    public static List<AttributeEntry> attributesFor(Item item) {
+        return ATTRIBUTES.get(item);
+    }
+
+    public static boolean logChanges() {
+        return config.logChanges;
+    }
+
     public static int reload() {
         config = FoodTweakerConfig.load();
         return applyOverrides();
@@ -59,10 +86,10 @@ public final class FoodTweaker {
             return 0;
         }
 
-        // Revert anything we changed previously so removed/edited entries don't stack across reloads.
         for (Map.Entry<Item, FoodProperties> e : ORIGINALS.entrySet()) {
             setFood(e.getKey(), e.getValue());
         }
+        ATTRIBUTES.clear();
 
         if (!config.enabled) {
             LOGGER.info("[FoodTweaker] Disabled in config; reverted to vanilla food values.");
@@ -93,7 +120,7 @@ public final class FoodTweaker {
         Item item = itemOpt.get();
 
         if (!ORIGINALS.containsKey(item)) {
-            ORIGINALS.put(item, item.getFoodProperties()); // may be null if the item was not edible
+            ORIGINALS.put(item, item.getFoodProperties());
         }
         FoodProperties existing = ORIGINALS.get(item);
 
@@ -105,7 +132,6 @@ public final class FoodTweaker {
         }
 
         boolean alwaysEat = o.canAlwaysEat != null ? o.canAlwaysEat : (existing != null && existing.canAlwaysEat());
-        // 1.20.1 has no eat-time value, only a "fast" flag (fast foods take ~0.8s instead of ~1.6s).
         boolean fast = o.eatSeconds != null ? (o.eatSeconds <= 0.8f) : (existing != null && existing.isFastFood());
         boolean meat = existing != null && existing.isMeat();
 
@@ -124,14 +150,12 @@ public final class FoodTweaker {
 
         int effectCount = 0;
         if (o.effects != null) {
-            // Explicit list replaces any existing effects.
             for (EffectEntry ee : o.effects) {
                 if (addEffect(builder, ee, idStr)) {
                     effectCount++;
                 }
             }
         } else if (existing != null) {
-            // Keep the item's current effects.
             for (com.mojang.datafixers.util.Pair<MobEffectInstance, Float> pair : existing.getEffects()) {
                 builder.effect(new MobEffectInstance(pair.getFirst()), pair.getSecond());
                 effectCount++;
@@ -141,9 +165,17 @@ public final class FoodTweaker {
         FoodProperties food = builder.build();
         setFood(item, food);
 
+        int attributeCount = 0;
+        if (o.attributeModifiers != null && !o.attributeModifiers.isEmpty()) {
+            attributeCount = FoodTweakerAttributes.validate(BuiltInRegistries.ITEM.getKey(item).toString(), o.attributeModifiers);
+            if (attributeCount > 0) {
+                ATTRIBUTES.put(item, o.attributeModifiers);
+            }
+        }
+
         if (config.logChanges) {
-            LOGGER.info("[FoodTweaker] {} -> nutrition={}, saturation={}, alwaysEdible={}, fast={}, effects={}",
-                    idStr, nutrition, saturation, alwaysEat, fast, effectCount);
+            LOGGER.info("[FoodTweaker] {} -> nutrition={}, saturation={}, alwaysEdible={}, fast={}, effects={}, attributeModifiers={}",
+                    idStr, nutrition, saturation, alwaysEat, fast, effectCount, attributeCount);
         }
         return true;
     }
@@ -177,11 +209,36 @@ public final class FoodTweaker {
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("reload").executes(ctx -> {
                     int n = reload();
+                    String error = FoodTweakerConfig.lastError();
+                    if (error != null) {
+                        ctx.getSource().sendFailure(Component.literal(
+                                "[FoodTweaker] config/foodtweaker.json could not be read, so NOTHING is applied: "
+                                        + error).withStyle(ChatFormatting.RED));
+                        return 0;
+                    }
                     ctx.getSource().sendSuccess(() -> Component.literal(
-                            "[FoodTweaker] Reloaded config and applied " + n
-                                    + " food override(s). Re-grab items (e.g. /give) to see the new values."), true);
+                            "[FoodTweaker] Reloaded config and applied " + n + " food override(s)."), true);
                     return n;
-                })));
+                }))
+                .then(Commands.literal("reset")
+                        .executes(ctx -> resetAttributes(ctx.getSource(),
+                                List.of(ctx.getSource().getPlayerOrException())))
+                        .then(Commands.argument("targets", EntityArgument.players())
+                                .executes(ctx -> resetAttributes(ctx.getSource(),
+                                        EntityArgument.getPlayers(ctx, "targets"))))));
+    }
+
+    private static int resetAttributes(CommandSourceStack source, Collection<ServerPlayer> targets) {
+        int removed = 0;
+        for (ServerPlayer player : targets) {
+            removed += FoodTweakerAttributes.clear(player);
+        }
+        int total = removed;
+        int playerCount = targets.size();
+        source.sendSuccess(() -> Component.literal(
+                "[FoodTweaker] Removed " + total + " permanent attribute modifier(s) from "
+                        + playerCount + " player(s)."), true);
+        return removed;
     }
 
     private static void setFood(Item item, FoodProperties food) {
@@ -198,7 +255,6 @@ public final class FoodTweaker {
             f.setAccessible(true);
             return f;
         } catch (NoSuchFieldException ignored) {
-            // Fall back to locating it by type in case the name differs under some mapping set.
             for (Field f : Item.class.getDeclaredFields()) {
                 if (FoodProperties.class.equals(f.getType())) {
                     f.setAccessible(true);

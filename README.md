@@ -33,6 +33,7 @@ For any item id you list, you can override:
 | `can_always_eat` | If `true`, the item can be eaten on a full hunger bar (like golden apples) |
 | `eat_seconds` | Eat speed. On 1.20.1 there are only two speeds: a value of `0.8` or less marks the food as **fast** (eaten in ~0.8s, like dried kelp); anything higher is normal speed (~1.6s) |
 | `effects` | Status effects applied when eaten — **works with vanilla *and* modded effects** (e.g. pufferfish-style Hunger/Poison/Nausea, or a modded buff) |
+| `attribute_modifiers` | **Permanent** stat changes applied when eaten (e.g. eat a golden apple once for +1 heart forever). Saved with the player; removable with `/foodtweaker reset` |
 
 It can also **turn a non-food item into food** (e.g. make a stick edible) — just give it at least
 `nutrition` and `saturation`.
@@ -44,18 +45,15 @@ just the eat time of a modded steak and leave everything else alone.
 
 ## What it cannot do
 
-- It does **not** add permanent attribute modifiers (like a permanent +max-health on eat). The
-  "pufferfish attributes" use case is covered because those are **status effects**, which are fully
-  supported — but lasting stat changes are a different system and are out of scope.
 - It does **not** change non-food properties (stack size, durability, cooldowns, crafting, etc.).
-- It only edits the item's **food data** (the `minecraft:food` component). The "leftover" item from
-  eating (e.g. a bowl from stew) is preserved automatically but cannot currently be changed.
-- **Existing item stacks don't retro-update.** Minecraft snapshots an item's data when the stack is
-  created, so items already sitting in inventories/chests keep their old stats. Newly obtained
-  copies (e.g. via `/give`, crafting, or loot) use the new values. After `/foodtweaker reload`,
-  grab a fresh copy to see changes.
-- It is effectively **server-side**: the change is applied where the world runs. In multiplayer,
-  install it on the server; connected clients receive the updated stats automatically.
+- It only edits the item's **food data**. The "leftover" item from eating (e.g. a bowl from stew) is
+  preserved automatically but cannot currently be changed.
+- Attribute modifiers are granted **per player, on eating** — they are not a property of the item,
+  so they don't show up in the item's tooltip.
+- It must be installed on **both the server and the client**. On 1.20.1 food data lives on the item
+  itself and is never synced, so a vanilla client will mispredict: eat animations run at the wrong
+  length, and items this mod made edible won't animate at all. Everything still resolves correctly
+  server-side, but the client experience is wrong without the mod present.
 
 ---
 
@@ -63,9 +61,19 @@ just the eat time of a modded steak and leave everything else alone.
 
 When a world/server is about to start (all mods are loaded and the registries are frozen by then),
 FoodTweaker reads its config and, for each listed item, builds a new `FoodProperties` and swaps it
-onto that item's default data components. Unlisted items are never touched, and a reload first
-reverts everything it previously changed before re-applying — so removing an entry restores the
-item to vanilla/original behavior.
+onto that item. Unlisted items are never touched, and a reload first reverts everything it
+previously changed before re-applying — so removing an entry restores the item to vanilla/original
+behavior. Because 1.20.1 stores food data on the `Item` rather than on the stack, changes take
+effect immediately on every existing stack — no need to re-`/give` anything.
+
+Attribute modifiers work differently, since they apply to the *player* rather than the item. The
+mod watches for a completed eat and adds a permanent modifier to the player's attribute map;
+vanilla saves permanent modifiers into the player's NBT, so they survive relogs and restarts with
+no extra save data of our own. Every modifier is named `FoodTweaker: <item id>`, which is what
+`/foodtweaker reset` matches on when taking them back.
+
+There are **no mixins**. The mod only uses reflection on a single vanilla field plus Architectury
+events, which keeps it about as conflict-free as a mod that rewrites item data can be.
 
 If an item id or effect id can't be found (e.g. that mod isn't installed, or a typo), FoodTweaker
 logs a clear warning and **skips only that entry** — it never crashes the game.
@@ -110,9 +118,64 @@ right inside the file.
       "show_particles": true,
       "show_icon": true
     }
+  ],
+  "attribute_modifiers": [   // optional; PERMANENT stat changes granted on eating
+    {
+      "id": "minecraft:generic.max_health", // vanilla or modded attribute id
+      "amount": 2.0,                        // for max_health, 2.0 = one heart
+      "operation": "addition",              // addition | multiply_base | multiply_total
+      "stacks": false,                      // false = grant once ever; true = every meal
+      "max_total": 8.0                      // optional cap when stacks is true
+    }
   ]
 }
 ```
+
+### Attribute modifiers
+
+These are **permanent and saved with the player** — they are not status effects and they do not
+expire. Treat them as progression rewards, not seasoning.
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `id` | *(required)* | Attribute id. Vanilla ones are namespaced with a `generic.`/`player.` prefix, e.g. `minecraft:generic.max_health` |
+| `amount` | `0` | How much to grant per meal |
+| `operation` | `addition` | `addition`, `multiply_base`, or `multiply_total` — same meaning as vanilla equipment modifiers |
+| `stacks` | `false` | `false` grants the bonus **once ever**, no matter how often the food is eaten. `true` accumulates on every meal |
+| `max_total` | *(none)* | Caps the accumulated amount when `stacks` is `true` |
+
+Commonly useful ids: `minecraft:generic.max_health`, `minecraft:generic.movement_speed`,
+`minecraft:generic.attack_damage`, `minecraft:generic.attack_speed`, `minecraft:generic.armor`,
+`minecraft:generic.armor_toughness`, `minecraft:generic.knockback_resistance`,
+`minecraft:generic.luck`. Modded attribute ids work too.
+
+```json
+"minecraft:golden_apple": {
+  "attribute_modifiers": [
+    { "id": "minecraft:generic.max_health", "amount": 2.0 }
+  ]
+},
+"minecraft:cooked_beef": {
+  "attribute_modifiers": [
+    { "id": "minecraft:generic.max_health", "amount": 1.0, "stacks": true, "max_total": 8.0 }
+  ]
+}
+```
+
+The first grants exactly one extra heart, however many golden apples get eaten. The second grants
+half a heart per steak, up to +4 hearts total.
+
+Because `stacks: true` is permanent and irreversible from the player's side, always set a
+`max_total` on it unless you genuinely want unbounded growth.
+
+To take the bonuses back — after a config change, a balance pass, or a mistake:
+
+```
+/foodtweaker reset [<players>]
+```
+
+With no argument it resets the player running it. It removes **every** modifier FoodTweaker has
+ever granted, including ones from config entries you have since deleted.
 
 ### Example
 
@@ -149,14 +212,23 @@ right inside the file.
 
 ### Reloading without a restart
 
-Run this in-game (requires permission level 2 / cheats):
+Either of these re-reads the file and re-applies it (both require permission level 2 / cheats):
 
 ```
 /foodtweaker reload
 ```
 
-It re-reads the file and re-applies it. Remember: grab a **fresh** copy of an item afterwards to see
-the new stats.
+```
+/reload
+```
+
+`/reload` works because FoodTweaker registers a server-data reload listener, so the config rides
+along with your datapack reloads. `/foodtweaker reload` does the same thing and additionally
+reports **in chat** if the JSON failed to parse — worth using while you are actively editing,
+because a malformed config silently falls back to applying nothing.
+
+Changes to food stats apply to items you are already holding. Attribute modifiers already granted
+to players are *not* revoked by a reload; use `/foodtweaker reset` for that.
 
 ### Finding item & effect ids
 
